@@ -1,2 +1,2 @@
 ## Experimenting with Open AI's Public Dev API
-- `meeting_transcript_summary.py`: Implements a simple meeting transciber and summarizer.
+- `meeting_transcriber_summarizer.py`: Implements a simple meeting transciber and summarizer. Takes in a audio recording and splits into chunks and sends to `Whisper AI` then summarized with `ext-davinci-003`
