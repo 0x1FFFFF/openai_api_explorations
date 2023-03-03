@@ -50,48 +50,43 @@ def transcribe_audio_file(file_path):
 
 def summarize_transcript(transcript_output_file):
     list_of_words = []
-    final_summary_list = [f"Summary of {transcript_output_file}"]
+    summaries = []
+    summary_output_file = transcript_output_file.split("_")[0] + "_summary.md"
     with open(transcript_output_file, "r") as f:
         list_of_words = f.read().split()
-    word_limit = 2000
+        word_limit = 3000
 
-    for i in range(0, len(list_of_words)-word_limit, word_limit):
-        print(f"Generating summary for {word_limit} words")
-        transcript_part = " ".join(list_of_words[i:i+word_limit])
-        prompt = f"Take this part of meeting trascript: \n\n{transcript_part}, \n\n and summarize the important information"
-        response = openai.Completion.create(
-        model="text-davinci-003",
-        prompt=prompt,
-        temperature=0.7,
-        max_tokens=400,
-        top_p=1,
-        frequency_penalty=0,
-        presence_penalty=0
-        )
-        # print(response)
-        final_summary_list += response.choices[0].text
-    
-    summary_output_file = transcript_output_file.split("_")[0] + "_summary.md"
+        for i in range(0, len(list_of_words)-word_limit, word_limit):
+            print(f"Generating part of summary")
+            transcript_part = " ".join(list_of_words[i:i+word_limit])
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that helps me summarize my meeting transcripts."},
+                    {"role": "user", "content": f"Here is a part of transcript of a meeting I have: {transcript_part}"},
+                    {"role": "user", "content": f"Now summarize this part for me with great details and in a professional tone with less than 500 words"},
+                ]
+            )
+            summaries.append(response.choices[0].message.content)
     with open(summary_output_file, "w+") as f:
-        f.write("".join(final_summary_list))
+        f.write("".join(summaries))
     
     with open(summary_output_file, "r+") as f:
         split_summary = f.read()
-        prompt = f"Summarize this meeting transcript: \n\n{split_summary}, \n\n and summarize it with important details"
-        response = openai.Completion.create(
-        model="text-davinci-003",
-        prompt=prompt,
-        temperature=0.7,
-        max_tokens=500,
-        top_p=1,
-        frequency_penalty=0,
-        presence_penalty=0
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that helps me summarize my meeting transcripts."},
+                {"role": "user", "content": f"Here is condensed summary of a meeting I had: \n\n{split_summary}"},
+                {"role": "user", "content": f"Please summarize it for me"}
+            ]
         )
-        f.write(f"\n\n##Final Summary\n{response.choices[0].text}",)
+        f.write(f"\n\n##Final Summary\n{response.choices[0].message.content}",)
 
     return summary_output_file
 
 if __name__ == '__main__':
-    input_file = "assets/test.mp3"
-    trascript_path = transcribe_audio_file(input_file)
-    summarize_transcript(trascript_path)
+    # input_file = "assets/test.mp3"
+    # trascript_path = transcribe_audio_file(input_file)
+    # summarize_transcript(trascript_path)
+    summarize_transcript("output/test_transcript.txt")
