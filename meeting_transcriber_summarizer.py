@@ -64,7 +64,7 @@ def summarize_transcript(transcript_output_file):
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant that helps me summarize my meeting transcripts."},
                     {"role": "user", "content": f"Here is a part of transcript of a meeting I have: {transcript_part}"},
-                    {"role": "user", "content": f"Now summarize this part for me with great details and in a professional tone with less than 500 words"},
+                    {"role": "user", "content": f"Now summarize this part for me with great details and in a professional tone with with about 300 words"},
                 ]
             )
             summaries.append(response.choices[0].message.content)
@@ -78,7 +78,7 @@ def summarize_transcript(transcript_output_file):
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that helps me summarize my meeting transcripts."},
                 {"role": "user", "content": f"Here is condensed summary of a meeting I had: \n\n{split_summary}"},
-                {"role": "user", "content": f"Please summarize it for me"}
+                {"role": "user", "content": f"Please summarize it for me in both English and Chinese"}
             ]
         )
         f.write(f"\n\n##Final Summary\n{response.choices[0].message.content}",)
