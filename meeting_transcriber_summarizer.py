@@ -10,7 +10,17 @@ from pydub.utils import make_chunks
 from pyannote.audio import Pipeline
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
+total_cost = 0
+total_prompt_tokens = 0
+total_completion_tokens = 0
+token_to_price = {
+    'gpt-3.5-turbo': 0.000002,
+    'gpt-4-8k': 0,
+    'gpt-4-32k': 0
+}
+backend_model = 'gpt-3.5-turbo'
 
+whisper_price_per_minute = 0.006
 # ---------------------Experimental stuff-------------------------
 
 # hugging_face_token = os.getenv("HUGGING_FACE_TOKEN")
@@ -73,7 +83,11 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 # --------------------------------------------------------------------------------------------------
 
 def divide_audio_files_chunks(file_path):
+    global total_cost
     myaudio = AudioSegment.from_file(file_path, os.path.splitext(file_path)[1][1:]) 
+    anticipated_whisper_cost = round(myaudio.duration_seconds/60) * whisper_price_per_minute
+    print(f"Anticipated whisper cost for file {file_path} is {anticipated_whisper_cost} USD")
+    total_cost += anticipated_whisper_cost
     chunk_length_ms = 10 * 60 * 1000 # 10 min in ms
     chunks = make_chunks(myaudio, chunk_length_ms) #Make chunks of 100 secounds
     chunk_dir = './assets/chunked/' + file_path + "/"
@@ -127,18 +141,18 @@ def summarize_chunk_iterator(input_file_path, output_file_path, translate_zh=Fal
             elif language == "Chinese":
                 list_of_words = [c for c in f.read()]
                 part_word_limit = max(override_part_limit, 1500)
-            print(len(list_of_words))
+            # print(len(list_of_words))
             part_number = 1
             sum_file.write(f"# Summary of {input_file_path}\n\n")
             for i in range(0, len(list_of_words)-part_word_limit, part_word_limit):            
-                print(f"Generating part of summary")
+                # print(f"Generating part of summary")
+                sum_file.write(f"\n\n## Part{part_number}\n\n")
                 transcript_part = " ".join(list_of_words[i:i+part_word_limit])
                 summary_part = summarize_text(transcript_part, language=language, word_limit=word_limit)
-                print(f"Writing part of summary", len(summary_part))
-                sum_file.write(f"\n\n## Part{part_number}\n\n")
+                # print(f"Writing part of summary", len(summary_part))
                 # pprint.pprint(summary_part)
                 sum_file.write(summary_part)
-                print("Finished writing part of summary")
+                # print("Finished writing part of summary")
                 part_number += 1
 
     print("iterator finished")
@@ -152,26 +166,37 @@ def summarize_transcript(transcript_output_file, translate_zh=False, language="E
     condensed_summary(summary_output_file, translate_zh=translate_zh, language=language)
     return summary_output_file
 
-def condensed_summary(summary_output_file, translate_zh=False, language="English", word_limit=150):
+def condensed_summary(summary_output_file, translate_zh=False, language="English", word_limit=300):
     print("Condensing summary")
     condensed_summary_output_file = summary_output_file.split("_")[0] + "_condensed_summary.md"
     summarize_chunk_iterator(summary_output_file, condensed_summary_output_file, translate_zh=translate_zh, language=language, word_limit=word_limit, override_part_limit=2000)
     return condensed_summary_output_file
 
 def summarize_text(text, language="English", word_limit=300):
+    global total_cost
+    global total_completion_tokens
+    global total_prompt_tokens
+
     response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
+        model=backend_model,
         messages=[
             {"role": "system", "content": "You are a helpful assistant that helps me summarize my meeting transcripts."},
             {"role": "user", "content": f"Here is a part of meeting notes I have: {text}"},
             {"role": "user", "content": f"Now summarize this part for me with great details and in a professional tone with strictly less than {word_limit} words in {language}. Please only capture the important details of the main topics of the meetings in bullet points and leave out the small talk and irrelevant chats."},
         ]
     )
+    usage = response.usage
+    print(usage)
+    cost = usage['prompt_tokens'] * token_to_price[backend_model] + usage['completion_tokens'] * token_to_price[backend_model]
+    total_cost += cost
+    total_completion_tokens += usage['completion_tokens']
+    total_prompt_tokens += usage['prompt_tokens']
+    print(f"This message uses {usage['prompt_tokens']} prompt_tokens and {usage['completion_tokens']} completion_tokens, this message cost ${cost}, running total cost: ${total_cost}")
     return response.choices[0].message.content
 
 def translate_text(text, language="English"):
     response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
+        model=backend_model,
         messages=[
             {"role": "system", "content": "You are a helpful assistant that helps me translate text to {language}"},
             {"role": "user", "content": f"Here is some text I need you to translate in accurate details: {text}"},
@@ -183,8 +208,9 @@ if __name__ == '__main__':
     # input_file = "assets/test2_zh.mp3"
     # transcribe_audio_file(input_file)
     # summarize_transcript(transcribe_audio_file(input_file))
-    summarize_transcript("output/dtest3.21.txt", language="Chinese")
-    # condensed_summary("output/dtest3.21.txt_summary.md", language="Chinese")
+    # summarize_transcript("output/2023.3.21 Management Meeting with 泽森科工.txt", language="Chinese")
+    condensed_summary("output/2023.3.21 Management Meeting with 泽森科工.txt_summary.md", language="Chinese")
+    print(f"Done! Total Prompt Tokens: {total_prompt_tokens}. Total Completion Tokens: {total_completion_tokens}. Total cost: ${total_cost}")
     # diarize_audio_file(input_file)
     # modify_audio_with_spacer(input_file)
     # whisper_transcribe_audio("output/test2_zh_diarization.wav")

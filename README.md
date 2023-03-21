@@ -9,6 +9,8 @@
 
 
 ## Meeting Transcriber and Summarizer To-do:
+- [x] Add token and cost calculation
+- [ ] Dump transcript into parts?
 - [ ] Multiprocessing - Right now all steps are sequential. This is a bottleneck.
   - [ ] Audio Transcribe
   - [ ] Meeting Part Summary
