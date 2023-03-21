@@ -1,15 +1,79 @@
 import glob
 import openai
 import os
+import re
+import whisper
+import pprint
 
 from pydub import AudioSegment 
 from pydub.utils import make_chunks
+from pyannote.audio import Pipeline
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+# ---------------------Experimental stuff-------------------------
+
+# hugging_face_token = os.getenv("HUGGING_FACE_TOKEN")
+# pipeline = Pipeline.from_pretrained('pyannote/speaker-diarization', use_auth_token=hugging_face_token)
+# spacermilli = 2000
+# spacer = AudioSegment.silent(duration=spacermilli)
+
+# print("Initialized OpenAI and Pyannote")
+
+# def diarize_audio_file(input_file_path):
+#     dz_config = {
+#         'uri': 'test',
+#         'audio': input_file_path
+#     }
+#     dz_segments = pipeline(dz_config)
+
+#     with open('output/' + input_file_path.split("/")[1].split(".")[0] + "_dz.txt", "w+") as f:
+#         f.write(str(dz_segments))
+
+# def generate_transcript_with_diarization(dz_txt_path):
+#     dz = open(dz_txt_path).read().splitlines()
+#     dzList = []
+#     for l in dz:
+#         start, end =  tuple(re.findall('[0-9]+:[0-9]+:[0-9]+\.[0-9]+', string=l))
+#         start = millisec(start) - spacermilli
+#         end = millisec(end)  - spacermilli
+#         lex = not re.findall('SPEAKER_01', string=l)
+#         dzList.append([start, end, lex])
+
+#     return dzList
+
+# def modify_audio_with_spacer(input_audio_path):
+#     sounds = spacer
+#     segments = []
+#     audio = AudioSegment.from_mp3(input_audio_path)
+#     dz_txt_path = 'output/' + input_audio_path.split("/")[1].split(".")[0] + "_dz.txt"
+#     dz = open(dz_txt_path).read().splitlines()
+#     for l in dz:
+#         start, end =  tuple(re.findall('[0-9]+:[0-9]+:[0-9]+\.[0-9]+', string=l))
+#         start = int(millisec(start)) #milliseconds
+#         end = int(millisec(end))  #milliseconds
+        
+#         segments.append(len(sounds))
+#         sounds = sounds.append(audio[start:end], crossfade=0)
+#         sounds = sounds.append(spacer, crossfade=0)
+
+#     dz_output = "output/" + input_audio_path.split("/")[1].split(".")[0] + "_diarization.wav"
+#     sounds.export(f"{dz_output}", format="wav") #Exports to a wav file in the current path.
+
+# def millisec(time_str):
+#     spl = time_str.split(":")
+#     s = (int)((int(spl[0]) * 60 * 60 + int(spl[1]) * 60 + float(spl[2]) )* 1000)
+#     return s
+
+# def whisper_transcribe_audio(audio_file):
+#     model = whisper.load_model("large")
+#     result = model.transcribe(audio_file, language="zh")
+#     with open("output/whisper_large_transcript.txt", "w+") as f:
+#         f.write(result.text)
+# --------------------------------------------------------------------------------------------------
 
 def divide_audio_files_chunks(file_path):
-    myaudio = AudioSegment.from_file(file_path, "mp3") 
+    myaudio = AudioSegment.from_file(file_path, os.path.splitext(file_path)[1][1:]) 
     chunk_length_ms = 10 * 60 * 1000 # 10 min in ms
     chunks = make_chunks(myaudio, chunk_length_ms) #Make chunks of 100 secounds
     chunk_dir = './assets/chunked/' + file_path + "/"
@@ -25,19 +89,22 @@ def divide_audio_files_chunks(file_path):
     return chunk_dir
         
 
-def transcribe_audio_file(file_path):
+def transcribe_audio_file(file_path, language="English"):
     chunk_dir = divide_audio_files_chunks(file_path=file_path)
     chunk_list = sorted([file for file in glob.glob(chunk_dir + "*.mp3")])
     transcript_output = ""
-    transcript_summary_output = ""
     if chunk_list:
         print("Transcribing audio files")
         for index, chunk in enumerate(chunk_list):
             print(f"Transcribing file: {chunk}")
             audio_file= open(chunk, "rb")
-            transcript = openai.Audio.transcribe("whisper-1", audio_file)
+            transcript = openai.Audio.transcribe(
+                "whisper-1", 
+                audio_file,
+                prompt="Transcribe the audio with each line being a sentence by a speaker, also annotate this sentence with corresponding timestamp of the audio recording")
             transcript_len = len(transcript.text)
-            print(f"Finsihed transcribing file: {chunk}, f{index} part with 10 minutes of the original audio, output length is for this file is {transcript_len}")
+            print(transcript.text)
+            print(f"Finsihed transcribing file: {chunk}, part f{index} with 10 minutes of the original audio, output length is for this file is {transcript_len}")
             transcript_output += transcript.text + "\n" + "-----------------------10 minutes of audio breaker-----------------------" + "\n"
 
     output_dir = './output/'
@@ -48,45 +115,76 @@ def transcribe_audio_file(file_path):
         f.write(transcript_output)
     return transcript_file_path
 
-def summarize_transcript(transcript_output_file):
+# to work around the limitation of 4096 max token
+def summarize_chunk_iterator(input_file_path, output_file_path, translate_zh=False, language="English", word_limit=300, override_part_limit=0):
     list_of_words = []
+    part_word_limit = 0
+    with open(output_file_path, "a") as sum_file:
+        with open(input_file_path, "r") as f:
+            if language == "English":
+                list_of_words = f.read().split()
+                part_word_limit = 3000
+            elif language == "Chinese":
+                list_of_words = [c for c in f.read()]
+                part_word_limit = max(override_part_limit, 1500)
+            print(len(list_of_words))
+            part_number = 1
+            sum_file.write(f"# Summary of {input_file_path}\n\n")
+            for i in range(0, len(list_of_words)-part_word_limit, part_word_limit):            
+                print(f"Generating part of summary")
+                transcript_part = " ".join(list_of_words[i:i+part_word_limit])
+                summary_part = summarize_text(transcript_part, language=language, word_limit=word_limit)
+                print(f"Writing part of summary", len(summary_part))
+                sum_file.write(f"\n\n## Part{part_number}\n\n")
+                # pprint.pprint(summary_part)
+                sum_file.write(summary_part)
+                print("Finished writing part of summary")
+                part_number += 1
+
+    print("iterator finished")
+    return output_file_path
+
+def summarize_transcript(transcript_output_file, translate_zh=False, language="English", word_limit=300):
+    print("Summarizing transcript")
     summaries = []
     summary_output_file = transcript_output_file.split("_")[0] + "_summary.md"
-    with open(transcript_output_file, "r") as f:
-        list_of_words = f.read().split()
-        word_limit = 3000
-
-        for i in range(0, len(list_of_words)-word_limit, word_limit):
-            print(f"Generating part of summary")
-            transcript_part = " ".join(list_of_words[i:i+word_limit])
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant that helps me summarize my meeting transcripts."},
-                    {"role": "user", "content": f"Here is a part of transcript of a meeting I have: {transcript_part}"},
-                    {"role": "user", "content": f"Now summarize this part for me with great details and in a professional tone with with about 300 words"},
-                ]
-            )
-            summaries.append(response.choices[0].message.content)
-    with open(summary_output_file, "w+") as f:
-        f.write("".join(summaries))
-    
-    with open(summary_output_file, "r+") as f:
-        split_summary = f.read()
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that helps me summarize my meeting transcripts."},
-                {"role": "user", "content": f"Here is condensed summary of a meeting I had: \n\n{split_summary}"},
-                {"role": "user", "content": f"Please summarize it for me in both English and Chinese"}
-            ]
-        )
-        f.write(f"\n\n##Final Summary\n{response.choices[0].message.content}",)
-
+    summarize_chunk_iterator(transcript_output_file, summary_output_file, translate_zh=translate_zh, language=language, word_limit=word_limit)
+    condensed_summary(summary_output_file, translate_zh=translate_zh, language=language)
     return summary_output_file
 
+def condensed_summary(summary_output_file, translate_zh=False, language="English", word_limit=150):
+    print("Condensing summary")
+    condensed_summary_output_file = summary_output_file.split("_")[0] + "_condensed_summary.md"
+    summarize_chunk_iterator(summary_output_file, condensed_summary_output_file, translate_zh=translate_zh, language=language, word_limit=word_limit, override_part_limit=2000)
+    return condensed_summary_output_file
+
+def summarize_text(text, language="English", word_limit=300):
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant that helps me summarize my meeting transcripts."},
+            {"role": "user", "content": f"Here is a part of meeting notes I have: {text}"},
+            {"role": "user", "content": f"Now summarize this part for me with great details and in a professional tone with strictly less than {word_limit} words in {language}. Please only capture the important details of the main topics of the meetings in bullet points and leave out the small talk and irrelevant chats."},
+        ]
+    )
+    return response.choices[0].message.content
+
+def translate_text(text, language="English"):
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant that helps me translate text to {language}"},
+            {"role": "user", "content": f"Here is some text I need you to translate in accurate details: {text}"},
+        ]
+    )
+    return response.choices[0].message.content
+        
 if __name__ == '__main__':
-    # input_file = "assets/test.mp3"
-    # trascript_path = transcribe_audio_file(input_file)
-    # summarize_transcript(trascript_path)
-    summarize_transcript("output/test_transcript.txt")
+    # input_file = "assets/test2_zh.mp3"
+    # transcribe_audio_file(input_file)
+    # summarize_transcript(transcribe_audio_file(input_file))
+    summarize_transcript("output/dtest3.21.txt", language="Chinese")
+    # condensed_summary("output/dtest3.21.txt_summary.md", language="Chinese")
+    # diarize_audio_file(input_file)
+    # modify_audio_with_spacer(input_file)
+    # whisper_transcribe_audio("output/test2_zh_diarization.wav")
