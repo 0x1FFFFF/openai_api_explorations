@@ -9,7 +9,9 @@
 
 
 ## Meeting Transcriber and Summarizer To-do:
-- [ ] Multiprocessing - it's slow right now as it has to sequentially process each part of the audio file
+- [ ] Multiprocessing - Right now all steps are sequential. This is a bottleneck.
+  - [ ] Audio Transcribe
+  - [ ] Meeting Part Summary
 - [ ] Decouple and make modules
 - [ ] Configurable detail level of part summary
 - [ ] Configurable detail level of condensed summary
@@ -18,7 +20,7 @@
     - [ ] PDF
     - [ ] HTML
     - [ ] Markdown
-- [ ] User friendly IO for non-technical users -- Accept audio file and output summary files
+- [ ] User-friendly IO for non-technical users -- Accept audio file and output summary files
   - [ ] Web App
   - [ ] Packaged Desktop Apps
     - [ ] Mac
